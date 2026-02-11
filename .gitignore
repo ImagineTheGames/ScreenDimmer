@@ -1,0 +1,29 @@
+# Build results
+bin/
+obj/
+out/
+*.dll
+*.exe
+*.pdb
+*.cache
+
+# User-specific
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# IDE
+.vs/
+.idea/
+*.swp
+*~
+
+# NuGet
+packages/
+*.nupkg
+project.lock.json
+project.fragment.lock.json
+
+# Publish
+publish/
