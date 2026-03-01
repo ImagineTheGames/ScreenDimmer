@@ -1,0 +1,13 @@
+---
+description: After making code changes, always kill the running app process and restart it.
+alwaysApply: true
+---
+
+# Restart app after changes
+
+When you finish making changes to this project (ScreenDimmer):
+
+1. **Kill the running process** – Stop any running ScreenDimmer.exe (e.g. `Stop-Process -Name ScreenDimmer -Force -ErrorAction SilentlyContinue` in PowerShell).
+2. **Restart the app** – Start the app again (e.g. run the built exe from `bin\Debug\net8.0-windows\ScreenDimmer.exe` or `dotnet run`).
+
+Do this as the last step before replying, so the user can test the changes immediately.

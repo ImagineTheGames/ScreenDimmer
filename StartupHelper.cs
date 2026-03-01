@@ -32,11 +32,8 @@ public static class StartupHelper
 
             if (enabled)
             {
-                var exePath = Environment.ProcessPath
-                    ?? Environment.GetCommandLineArgs().FirstOrDefault()
-                    ?? Path.Combine(AppContext.BaseDirectory, "ScreenDimmer.exe");
-                if (exePath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-                    exePath = Path.ChangeExtension(exePath, ".exe");
+                // Must use path to ScreenDimmer.exe; ProcessPath can be dotnet.exe when run via dotnet run/IDE
+                var exePath = GetExePath();
                 key.SetValue(ValueName, $"\"{exePath}\"");
             }
             else
@@ -48,5 +45,21 @@ public static class StartupHelper
         {
             // ignore
         }
+    }
+
+    /// <summary>
+    /// Resolves the full path to ScreenDimmer.exe. When run via dotnet run/IDE, ProcessPath points to dotnet.exe,
+    /// so we always resolve to the actual exe in the app's output directory for correct startup registration.
+    /// </summary>
+    internal static string GetExePath()
+    {
+        var processPath = Environment.ProcessPath;
+        if (!string.IsNullOrEmpty(processPath) &&
+            processPath.EndsWith("ScreenDimmer.exe", StringComparison.OrdinalIgnoreCase) &&
+            File.Exists(processPath))
+            return Path.GetFullPath(processPath);
+
+        var exePath = Path.Combine(AppContext.BaseDirectory, "ScreenDimmer.exe");
+        return Path.GetFullPath(File.Exists(exePath) ? exePath : processPath ?? exePath);
     }
 }

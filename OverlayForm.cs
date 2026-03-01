@@ -12,36 +12,50 @@ public sealed class OverlayForm : Form
     public int DimLevel
     {
         get => _dimLevel;
-        set { _dimLevel = Math.Clamp(value, 0, 100); Invalidate(); }
+        set
+        {
+            _dimLevel = Math.Clamp(value, 0, 100);
+            Invalidate();
+            if (IsHandleCreated && !IsDisposed) ApplyTransparency();
+        }
     }
 
     public int ColorTemp
     {
         get => _colorTemp;
-        set { _colorTemp = Math.Clamp(value, 0, 100); Invalidate(); }
+        set
+        {
+            _colorTemp = Math.Clamp(value, 0, 100);
+            Invalidate();
+            if (IsHandleCreated && !IsDisposed) ApplyTransparency();
+        }
     }
 
     public bool OverlayActive
     {
         get => _overlayActive;
-        set { _overlayActive = value; Invalidate(); }
+        set
+        {
+            _overlayActive = value;
+            Invalidate();
+            if (IsHandleCreated && !IsDisposed) ApplyTransparency();
+        }
     }
 
-    public OverlayForm(int dimLevel, int colorTemp)
+    /// <summary>Create overlay for a specific screen (one form per monitor).</summary>
+    public OverlayForm(Rectangle bounds, int dimLevel, int colorTemp)
     {
         _dimLevel = dimLevel;
         _colorTemp = colorTemp;
 
         FormBorderStyle = FormBorderStyle.None;
-        WindowState = FormWindowState.Maximized;
+        WindowState = FormWindowState.Normal;
         TopMost = true;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         BackColor = Color.Black;
         DoubleBuffered = true;
 
-        // Cover entire virtual screen (all monitors)
-        var bounds = SystemInformation.VirtualScreen;
         Bounds = bounds;
         Location = bounds.Location;
 
@@ -75,6 +89,13 @@ public sealed class OverlayForm : Form
         ApplyTransparency();
         Win32.SetWindowLong(Handle, Win32.GWL_EXSTYLE,
             Win32.GetWindowLong(Handle, Win32.GWL_EXSTYLE) | Win32.WS_EX_TRANSPARENT);
+        // Re-apply after short delay when started with Windows (display/DWM may not be ready yet)
+        if (Environment.TickCount64 < 120_000)
+        {
+            var t = new System.Windows.Forms.Timer { Interval = 800 };
+            t.Tick += (_, _) => { t.Stop(); t.Dispose(); ApplyTransparency(); };
+            t.Start();
+        }
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -86,6 +107,11 @@ public sealed class OverlayForm : Form
     private void ApplyTransparency()
     {
         if (!IsHandleCreated || IsDisposed) return;
+
+        // Must be layered for SetLayeredWindowAttributes to take effect (required at startup / before first paint).
+        var exStyle = Win32.GetWindowLong(Handle, Win32.GWL_EXSTYLE);
+        if ((exStyle & Win32.WS_EX_LAYERED) == 0)
+            Win32.SetWindowLong(Handle, Win32.GWL_EXSTYLE, exStyle | Win32.WS_EX_LAYERED);
 
         if (!_overlayActive)
         {
@@ -132,16 +158,13 @@ public sealed class OverlayForm : Form
         return Color.FromArgb(255, Math.Min(r, 255), Math.Min(g, 255), Math.Min(b, 255));
     }
 
-    protected override void SetBoundsCore(int x, int y, int width, int height, BoundsSpecified specified)
-    {
-        var bounds = SystemInformation.VirtualScreen;
-        base.SetBoundsCore(bounds.X, bounds.Y, bounds.Width, bounds.Height, BoundsSpecified.All);
-    }
-
     protected override void Dispose(bool disposing)
     {
-        _refreshTimer?.Stop();
-        _refreshTimer?.Dispose();
+        if (disposing)
+        {
+            _refreshTimer?.Stop();
+            _refreshTimer?.Dispose();
+        }
         base.Dispose(disposing);
     }
 }

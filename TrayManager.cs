@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 
 namespace ScreenDimmer;
 
@@ -6,10 +7,11 @@ public sealed class TrayManager : IDisposable
 {
     private readonly NotifyIcon _notifyIcon;
     private readonly ContextMenuStrip _contextMenu;
-    private readonly OverlayForm _overlay;
+    private readonly OverlayManager _overlay;
     private readonly AppSettings _settings;
+    private readonly MenuOutsideClickHook _outsideClickHook;
 
-    public TrayManager(OverlayForm overlay, AppSettings settings)
+    public TrayManager(OverlayManager overlay, AppSettings settings)
     {
         _overlay = overlay;
         _settings = settings;
@@ -52,12 +54,18 @@ public sealed class TrayManager : IDisposable
         }
 
         _contextMenu = BuildContextMenu();
+        _outsideClickHook = new MenuOutsideClickHook(_contextMenu);
+        _contextMenu.Closing += OnContextMenuClosing;
+        _contextMenu.Closed += OnContextMenuClosed;
         _contextMenu.Opening += (_, _) =>
         {
+            _overlayCheckboxJustClicked = false;
+            _startupCheckboxJustClicked = false;
             if (_dimTrack != null) _dimTrack.Value = _overlay.DimLevel;
             if (_colorTrack != null) _colorTrack.Value = _overlay.ColorTemp;
-            UpdateEnabledMenuItemCheckState();
-            UpdateStartupMenuItemCheckState();
+            UpdateOverlayCheckBoxState();
+            UpdateStartupCheckBoxState();
+            _outsideClickHook.Install();
         };
         _notifyIcon.ContextMenuStrip = _contextMenu;
 
@@ -65,40 +73,52 @@ public sealed class TrayManager : IDisposable
 
     private TrackBar? _dimTrack;
     private TrackBar? _colorTrack;
-    private ToolStripMenuItem? _startupMenuItem;
-    private ToolStripMenuItem? _enabledMenuItem;
+    private CheckBox? _overlayCheckBox;
+    private CheckBox? _startupCheckBox;
+    private bool _overlayCheckboxJustClicked;
+    private bool _startupCheckboxJustClicked;
+    private bool _reopenMenuAfterCheckboxClick;
 
-    private void ToggleOverlayEnabled(ToolStripMenuItem item)
+    private void OnContextMenuClosing(object? sender, ToolStripDropDownClosingEventArgs e)
     {
-        bool enabled = item.Checked;
-        _overlay.OverlayActive = enabled;
-        _settings.OverlayEnabled = enabled;
-        _settings.Save();
+        // Don't cancel: closing then reopening avoids breaking "click outside to close" (cancel leaves the dropdown stuck).
+        if (e.CloseReason == ToolStripDropDownCloseReason.ItemClicked &&
+            (_overlayCheckboxJustClicked || _startupCheckboxJustClicked))
+            _reopenMenuAfterCheckboxClick = true;
+        _overlayCheckboxJustClicked = false;
+        _startupCheckboxJustClicked = false;
     }
 
-    private void UpdateEnabledMenuItemCheckState()
+    private void OnContextMenuClosed(object? sender, ToolStripDropDownClosedEventArgs e)
     {
-        if (_enabledMenuItem != null)
+        _outsideClickHook.Uninstall();
+        if (_reopenMenuAfterCheckboxClick)
         {
-            _enabledMenuItem.Checked = _overlay.OverlayActive;
+            _reopenMenuAfterCheckboxClick = false;
+            var pos = Cursor.Position;
+            _contextMenu.BeginInvoke(() =>
+            {
+                _contextMenu.Show(pos);
+                _outsideClickHook.Install();
+            });
+        }
+    }
+
+    private void UpdateOverlayCheckBoxState()
+    {
+        if (_overlayCheckBox != null)
+        {
+            _overlayCheckBox.Checked = _overlay.OverlayActive;
             _settings.OverlayEnabled = _overlay.OverlayActive;
         }
     }
 
-    private void ToggleStartOnStartup(ToolStripMenuItem item)
+    private void UpdateStartupCheckBoxState()
     {
-        bool enabled = item.Checked;
-        StartupHelper.SetEnabled(enabled);
-        _settings.StartOnStartup = enabled;
-        _settings.Save();
-    }
-
-    private void UpdateStartupMenuItemCheckState()
-    {
-        if (_startupMenuItem != null)
+        if (_startupCheckBox != null)
         {
-            _startupMenuItem.Checked = StartupHelper.IsEnabled;
-            _settings.StartOnStartup = _startupMenuItem.Checked;
+            _startupCheckBox.Checked = StartupHelper.IsEnabled || _settings.StartOnStartup;
+            _settings.StartOnStartup = _startupCheckBox.Checked;
         }
     }
 
@@ -150,32 +170,118 @@ public sealed class TrayManager : IDisposable
 
         menu.Items.Add(new ToolStripSeparator());
 
-        _enabledMenuItem = new ToolStripMenuItem("Overlay enabled", null, (_, _) => { if (_enabledMenuItem != null) ToggleOverlayEnabled(_enabledMenuItem); })
+        var overlayPanel = new Panel { Width = 260, Height = 28 };
+        _overlayCheckBox = new CheckBox
         {
-            CheckOnClick = true,
+            Text = "Overlay enabled",
+            Location = new Point(8, 4),
+            AutoSize = true,
             Checked = _settings.OverlayEnabled
         };
-        _overlay.OverlayActive = _settings.OverlayEnabled;
-        menu.Items.Add(_enabledMenuItem);
-
-        _startupMenuItem = new ToolStripMenuItem("Start on system startup", null, (_, _) => { if (_startupMenuItem != null) ToggleStartOnStartup(_startupMenuItem); })
+        _overlayCheckBox.MouseDown += (_, _) => _overlayCheckboxJustClicked = true;
+        _overlayCheckBox.CheckedChanged += (_, _) =>
         {
-            CheckOnClick = true,
+            if (_overlayCheckBox == null) return;
+            _overlay.OverlayActive = _overlayCheckBox.Checked;
+            _settings.OverlayEnabled = _overlayCheckBox.Checked;
+            _settings.Save();
+        };
+        overlayPanel.Controls.Add(_overlayCheckBox);
+        menu.Items.Add(new ToolStripControlHost(overlayPanel) { Margin = Padding.Empty, Padding = new Padding(8, 6, 8, 6) });
+        _overlay.OverlayActive = _settings.OverlayEnabled;
+
+        var startupPanel = new Panel { Width = 260, Height = 28 };
+        _startupCheckBox = new CheckBox
+        {
+            Text = "Start on system startup",
+            Location = new Point(8, 4),
+            AutoSize = true,
             Checked = StartupHelper.IsEnabled || _settings.StartOnStartup
         };
-        if (_startupMenuItem.Checked && !StartupHelper.IsEnabled)
-            StartupHelper.SetEnabled(true);
-        _settings.StartOnStartup = _startupMenuItem.Checked;
-        menu.Items.Add(_startupMenuItem);
+        if (_startupCheckBox.Checked)
+            StartupHelper.SetEnabled(true); // Refresh path (fixes wrong path from dotnet run / IDE)
+        _settings.StartOnStartup = _startupCheckBox.Checked;
+        _startupCheckBox.MouseDown += (_, _) => _startupCheckboxJustClicked = true;
+        _startupCheckBox.CheckedChanged += (_, _) =>
+        {
+            if (_startupCheckBox == null) return;
+            StartupHelper.SetEnabled(_startupCheckBox.Checked);
+            _settings.StartOnStartup = _startupCheckBox.Checked;
+            _settings.Save();
+        };
+        startupPanel.Controls.Add(_startupCheckBox);
+        menu.Items.Add(new ToolStripControlHost(startupPanel) { Margin = Padding.Empty, Padding = new Padding(8, 6, 8, 6) });
 
-        menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => Application.Exit()));
+        menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => { _contextMenu.Close(); Application.Exit(); }));
 
         return menu;
     }
 
     public void Dispose()
     {
+        _outsideClickHook.Uninstall();
+        _outsideClickHook.Dispose();
+        _contextMenu.Closing -= OnContextMenuClosing;
+        _contextMenu.Closed -= OnContextMenuClosed;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+    }
+}
+
+/// <summary>Uses a low-level mouse hook to close the menu when the user clicks anywhere outside it (desktop, overlay, other apps).</summary>
+internal sealed class MenuOutsideClickHook : IDisposable
+{
+    private readonly ContextMenuStrip _menu;
+    private readonly Win32.LowLevelMouseProc _proc;
+    private IntPtr _hookHandle = IntPtr.Zero;
+    private bool _disposed;
+
+    public MenuOutsideClickHook(ContextMenuStrip menu)
+    {
+        _menu = menu;
+        _proc = HookCallback;
+    }
+
+    public void Install()
+    {
+        if (_hookHandle != IntPtr.Zero || _disposed) return;
+        using var curProcess = System.Diagnostics.Process.GetCurrentProcess();
+        using var curModule = curProcess.MainModule;
+        if (curModule?.ModuleName == null) return;
+        _hookHandle = Win32.SetWindowsHookEx(Win32.WH_MOUSE_LL, _proc, Win32.GetModuleHandle(curModule.ModuleName), 0);
+    }
+
+    public void Uninstall()
+    {
+        if (_hookHandle == IntPtr.Zero) return;
+        Win32.UnhookWindowsHookEx(_hookHandle);
+        _hookHandle = IntPtr.Zero;
+    }
+
+    private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && wParam == (IntPtr)Win32.WM_LBUTTONDOWN_LL && _menu.Visible)
+        {
+            var hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+            var clickPos = new Point(hookStruct.pt.X, hookStruct.pt.Y);
+            Rectangle bounds;
+            var form = _menu.FindForm();
+            if (form != null && form.Visible)
+                bounds = form.Bounds;
+            else if (_menu.IsHandleCreated && Win32.GetWindowRect(_menu.Handle, out RECT r))
+                bounds = new Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
+            else
+                bounds = Rectangle.Empty;
+            if (!bounds.IsEmpty && !bounds.Contains(clickPos))
+                _menu.BeginInvoke(() => { if (_menu.Visible) _menu.Close(); });
+        }
+        return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        Uninstall();
+        _disposed = true;
     }
 }

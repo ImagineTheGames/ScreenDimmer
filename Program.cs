@@ -18,16 +18,22 @@ static class Program
 
         ApplicationConfiguration.Initialize();
 
-        var settings = AppSettings.Load();
-        var overlay = new OverlayForm(settings.DimLevel, settings.ColorTemp) { OverlayActive = settings.OverlayEnabled };
-        var tray = new TrayManager(overlay, settings);
+        // When started with Windows, display may not be ready. Delay to let DWM/explorer initialize.
+        if (Environment.TickCount64 < 120_000) // System up < 2 min = likely startup
+        {
+            Thread.Sleep(4000);
+        }
 
-        overlay.Show();
+        var settings = AppSettings.Load();
+        var overlayManager = new OverlayManager(settings.DimLevel, settings.ColorTemp, settings.OverlayEnabled);
+        var tray = new TrayManager(overlayManager, settings);
+
+        overlayManager.Show();
 
         Application.Run();
 
         tray.Dispose();
-        overlay.Dispose();
+        overlayManager.Dispose();
         _mutex?.ReleaseMutex();
         _mutex?.Dispose();
     }
