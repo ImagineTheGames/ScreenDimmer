@@ -122,8 +122,8 @@ public sealed class OverlayForm : Form
         byte alpha;
         if (_dimLevel > 0)
         {
-            // Dimming on: alpha from dim level (0–220 for darkness)
-            alpha = (byte)((_dimLevel / 100.0) * 220);
+            // Dimming on: alpha from dim level (0–255 for full darkness; HDR needs the higher ceiling)
+            alpha = (byte)Math.Round((_dimLevel / 100.0) * 255);
         }
         else
         {

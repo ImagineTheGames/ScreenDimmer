@@ -25,7 +25,7 @@ static class Program
         }
 
         var settings = AppSettings.Load();
-        var overlayManager = new OverlayManager(settings.DimLevel, settings.ColorTemp, settings.OverlayEnabled);
+        var overlayManager = new OverlayManager(settings.DimLevel, settings.ColorTemp, settings.OverlayEnabled, settings.UseHardwareBrightness);
         var tray = new TrayManager(overlayManager, settings);
 
         overlayManager.Show();

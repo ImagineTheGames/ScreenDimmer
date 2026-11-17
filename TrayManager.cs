@@ -61,10 +61,12 @@ public sealed class TrayManager : IDisposable
         {
             _overlayCheckboxJustClicked = false;
             _startupCheckboxJustClicked = false;
+            _hardwareCheckboxJustClicked = false;
             if (_dimTrack != null) _dimTrack.Value = _overlay.DimLevel;
             if (_colorTrack != null) _colorTrack.Value = _overlay.ColorTemp;
             UpdateOverlayCheckBoxState();
             UpdateStartupCheckBoxState();
+            UpdateHardwareCheckBoxState();
             _outsideClickHook.Install();
         };
         _notifyIcon.ContextMenuStrip = _contextMenu;
@@ -75,18 +77,21 @@ public sealed class TrayManager : IDisposable
     private TrackBar? _colorTrack;
     private CheckBox? _overlayCheckBox;
     private CheckBox? _startupCheckBox;
+    private CheckBox? _hardwareCheckBox;
     private bool _overlayCheckboxJustClicked;
     private bool _startupCheckboxJustClicked;
+    private bool _hardwareCheckboxJustClicked;
     private bool _reopenMenuAfterCheckboxClick;
 
     private void OnContextMenuClosing(object? sender, ToolStripDropDownClosingEventArgs e)
     {
         // Don't cancel: closing then reopening avoids breaking "click outside to close" (cancel leaves the dropdown stuck).
         if (e.CloseReason == ToolStripDropDownCloseReason.ItemClicked &&
-            (_overlayCheckboxJustClicked || _startupCheckboxJustClicked))
+            (_overlayCheckboxJustClicked || _startupCheckboxJustClicked || _hardwareCheckboxJustClicked))
             _reopenMenuAfterCheckboxClick = true;
         _overlayCheckboxJustClicked = false;
         _startupCheckboxJustClicked = false;
+        _hardwareCheckboxJustClicked = false;
     }
 
     private void OnContextMenuClosed(object? sender, ToolStripDropDownClosedEventArgs e)
@@ -119,6 +124,18 @@ public sealed class TrayManager : IDisposable
         {
             _startupCheckBox.Checked = StartupHelper.IsEnabled || _settings.StartOnStartup;
             _settings.StartOnStartup = _startupCheckBox.Checked;
+        }
+    }
+
+    private void UpdateHardwareCheckBoxState()
+    {
+        if (_hardwareCheckBox != null)
+        {
+            _hardwareCheckBox.Enabled = _overlay.HardwareAvailable;
+            _hardwareCheckBox.Checked = _overlay.UseHardwareBrightness && _overlay.HardwareAvailable;
+            _hardwareCheckBox.Text = _overlay.HardwareAvailable
+                ? "Dim real backlight (true black)"
+                : "Dim real backlight (display does not support it)";
         }
     }
 
@@ -173,7 +190,7 @@ public sealed class TrayManager : IDisposable
         var overlayPanel = new Panel { Width = 260, Height = 28 };
         _overlayCheckBox = new CheckBox
         {
-            Text = "Overlay enabled",
+            Text = "Dimming enabled",
             Location = new Point(8, 4),
             AutoSize = true,
             Checked = _settings.OverlayEnabled
@@ -189,6 +206,27 @@ public sealed class TrayManager : IDisposable
         overlayPanel.Controls.Add(_overlayCheckBox);
         menu.Items.Add(new ToolStripControlHost(overlayPanel) { Margin = Padding.Empty, Padding = new Padding(8, 6, 8, 6) });
         _overlay.OverlayActive = _settings.OverlayEnabled;
+
+        var hardwarePanel = new Panel { Width = 260, Height = 28 };
+        _hardwareCheckBox = new CheckBox
+        {
+            Text = "Dim real backlight (true black)",
+            Location = new Point(8, 4),
+            AutoSize = true,
+            Checked = _settings.UseHardwareBrightness && _overlay.HardwareAvailable,
+            Enabled = _overlay.HardwareAvailable
+        };
+        _hardwareCheckBox.MouseDown += (_, _) => _hardwareCheckboxJustClicked = true;
+        _hardwareCheckBox.CheckedChanged += (_, _) =>
+        {
+            if (_hardwareCheckBox == null) return;
+            _overlay.UseHardwareBrightness = _hardwareCheckBox.Checked;
+            _settings.UseHardwareBrightness = _hardwareCheckBox.Checked;
+            _settings.Save();
+        };
+        hardwarePanel.Controls.Add(_hardwareCheckBox);
+        menu.Items.Add(new ToolStripControlHost(hardwarePanel) { Margin = Padding.Empty, Padding = new Padding(8, 6, 8, 6) });
+        UpdateHardwareCheckBoxState();
 
         var startupPanel = new Panel { Width = 260, Height = 28 };
         _startupCheckBox = new CheckBox

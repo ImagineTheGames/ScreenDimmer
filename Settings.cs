@@ -7,6 +7,7 @@ public sealed class AppSettings
     public int DimLevel { get; set; } = 0;  // 0-100
     public int ColorTemp { get; set; } = 0;  // 0=no filter, 100=warmest
     public bool OverlayEnabled { get; set; } = true;  // quick toggle for dim + color
+    public bool UseHardwareBrightness { get; set; } = true;  // dim the real backlight (DDC/CI or laptop panel) before falling back to the overlay
     public bool StartOnStartup { get; set; } = false;
 
     private static string SettingsPath =>
